@@ -1,65 +1,79 @@
+# app.py
 import os
 from dotenv import load_dotenv
 import streamlit as st
-from langchain.chat_models import ChatOpenAI
-from langchain.schema import SystemMessage, HumanMessage
+from langchain_openai import ChatOpenAI
+from langchain.schema import SystemMessage, HumanMessage  # Lesson8の書き方に合わせています
 
-# 環境変数読み込み
+# --- .env / Secrets の読み込み ---
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Streamlit アプリ設定
-st.set_page_config(page_title="LLM Webアプリ", page_icon="🤖")
-
-# アプリ概要表示
-st.title("💬 LLM Webアプリ")
-st.write("""
-このアプリは、あなたの質問にLLMが回答します。
-下記の手順で使ってください：
-1. 専門家の種類をラジオボタンから選択
-2. テキストを入力
-3. 「送信」を押すと、選択した専門家になりきったLLMが回答します
+# --- Streamlit ページ設定 ---
+st.set_page_config(page_title="LLM Webアプリ", page_icon="🤖", layout="centered")
+st.title("💬 LLM Webアプリ（LangChain × Streamlit）")
+st.markdown("""
+**使い方**  
+1. 専門家の種類（A/B）を選択  
+2. テキストを入力  
+3. 「送信」を押すと、選択した専門家としてLLMが回答します  
 """)
 
-# 専門家の種類を選択
-expert_type = st.radio(
-    "専門家の種類を選んでください",
-    ("旅行プランナー", "歴史研究者")
-)
+# --- 専門家プロファイル（A/B） ---
+EXPERTS = {
+    "A": {
+        "label": "A：旅行プランナー",
+        "system": "あなたは旅行プランの専門家です。旅行者の希望や制約に合わせ、現実的で安全な旅程を日本語で提案してください。必要に応じて費用感・移動手段・注意事項も補足してください。"
+    },
+    "B": {
+        "label": "B：歴史研究者",
+        "system": "あなたは歴史の専門家です。質問に対して史実に基づき、日本語でわかりやすく背景・因果・重要人物を整理して説明してください。推測は推測と明確に区別してください。"
+    },
+}
 
-# ユーザー入力
-user_input = st.text_area("質問を入力してください")
+# --- LLM呼び出し関数（入力テキスト, ラジオ選択値 を引数に、回答文字列を返す） ---
+def get_llm_response(input_text: str, expert_key: str) -> str:
+    if expert_key not in EXPERTS:
+        raise ValueError("expert_key は 'A' か 'B' を指定してください。")
+    system_prompt = EXPERTS[expert_key]["system"]
 
-# LLM呼び出し関数
-def get_llm_response(expert, text):
-    if expert == "旅行プランナー":
-        system_prompt = "あなたは旅行プランの専門家です。旅行者の希望に合わせた最適な旅行プランを提案してください。"
-    elif expert == "歴史研究者":
-        system_prompt = "あなたは歴史の専門家です。質問に対して歴史的事実と背景を詳しく説明してください。"
-    else:
-        system_prompt = "あなたは有能なアシスタントです。"
-
+    # OPENAI_API_KEY は .env / Secrets から自動で読まれるので引数は不要
     llm = ChatOpenAI(
-        model_name="gpt-4o-mini",
-        temperature=0.7,
-        openai_api_key=OPENAI_API_KEY
+        model="gpt-4o-mini",
+        temperature=0.5
     )
 
     messages = [
         SystemMessage(content=system_prompt),
-        HumanMessage(content=text)
+        HumanMessage(content=input_text)
     ]
+    result = llm(messages)  # AIMessage
+    return result.content
 
-    response = llm(messages)
-    return response.content
+# --- UI ---
+# ラジオ：A/Bを内部キーで保持し、表示はlabelに
+expert_key = st.radio(
+    "専門家の種類を選んでください",
+    options=list(EXPERTS.keys()),
+    format_func=lambda k: EXPERTS[k]["label"],
+    horizontal=True
+)
 
-# 実行ボタン
+user_input = st.text_area("質問・相談内容を入力してください", height=150)
+
+# --- 送信ハンドラ ---
 if st.button("送信"):
-    if user_input.strip():
-        answer = get_llm_response(expert_type, user_input)
-        st.subheader("回答")
-        st.write(answer)
+    if not os.getenv("OPENAI_API_KEY"):
+        st.error("OPENAI_API_KEY が未設定です。Streamlit Cloud の Secrets か .env に設定してください。", icon="❌")
+    elif not user_input.strip():
+        st.warning("テキストを入力してください。", icon="⚠️")
     else:
-        st.warning("質問を入力してください。")
+        with st.spinner("AIが回答を生成しています…"):
+            try:
+                answer = get_llm_response(user_input, expert_key)
+                st.subheader("✅ 回答")
+                st.write(answer)
+            except Exception as e:
+                st.error(f"エラー: {e}")
 
 
